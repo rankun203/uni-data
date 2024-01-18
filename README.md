@@ -1,3 +1,17 @@
+### Run
+
+Install dependencies
+
+```bash
+pnpm install
+```
+
+Local development
+
+```bash
+npx nodemon -w . -x "pnpm tsc && node --trace-deprecation dist/app.js" -e "ts json"
+```
+
 ### APIs
 
 Path: `/universities/rmit/academic-contacts`
