@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom';
+import fetch from 'node-fetch';
 import { logger } from '../utils/logger';
 import { NotFoundError, UnknownPageStructureError } from './errors';
 
@@ -20,13 +21,15 @@ export async function createContact(url: ContactUrl) {
   return contact;
 }
 
+const strip = (str?: string | null) => (str ? str.replaceAll(/[\s\s]+/g, ' ').trim() : undefined);
+
 export async function parsePageContentToContact(html: string) {
   logger.info(`[parsePageContentToContact] ${html.length}`);
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   const contact: Contact = {};
 
-  contact.name = doc.querySelector('.masthead > h1')?.textContent?.trim();
+  contact.name = strip(doc.querySelector('.masthead > h1')?.textContent);
 
   const summaryEle = doc.querySelector('.staff-summary .c-summary');
 
@@ -34,34 +37,31 @@ export async function parsePageContentToContact(html: string) {
     const spans = p.querySelectorAll('span');
     for (let i = 0; i < spans.length; i++) {
       const span = spans.item(i);
-      const spanName = span.textContent?.trim();
+      const spanName = strip(span.textContent);
       switch (spanName) {
         case 'Position:':
-          contact.position = spans.item(i + 1)?.textContent?.trim();
+          contact.position = strip(spans.item(i + 1)?.textContent);
           break;
         case 'College / Portfolio:':
-          contact.college = spans.item(i + 1)?.textContent?.trim();
+          contact.college = strip(spans.item(i + 1)?.textContent);
           break;
         case 'School / Department:':
-          contact.school = spans.item(i + 1)?.textContent?.trim();
+          contact.school = strip(spans.item(i + 1)?.textContent);
           break;
         case 'Phone:':
-          contact.position = spans
-            .item(i + 1)
-            ?.textContent?.trim()
-            .replace(/\s+/g, ' ');
+          contact.position = strip(spans.item(i + 1)?.textContent?.replace(/\s+/g, ' '));
           break;
         case 'Email:':
-          contact.email = spans.item(i + 1)?.textContent?.trim();
+          contact.email = strip(spans.item(i + 1)?.textContent);
           break;
         case 'Campus:':
-          contact.campus = spans.item(i + 1)?.textContent?.trim();
+          contact.campus = strip(spans.item(i + 1)?.textContent);
           break;
         case 'Contact me about:':
-          contact.contactAbout = spans.item(i + 1)?.textContent?.trim();
+          contact.contactAbout = strip(spans.item(i + 1)?.textContent);
           break;
         case 'ORCID:':
-          contact.orcid = spans.item(i + 1)?.textContent?.trim();
+          contact.orcid = strip(spans.item(i + 1)?.textContent);
           break;
       }
     }
@@ -75,33 +75,41 @@ export async function parsePageContentToContact(html: string) {
   return contact;
 }
 
+const hasChild = (ele: Element, tagName: string, className?: string) => {
+  const child = ele.querySelector(tagName);
+  if (child && className) {
+    return [...child.classList].includes(className);
+  } else {
+    return !!child;
+  }
+};
+
 export async function parsePageContentToContact2(html: string) {
   logger.info(`[parsePageContentToContact2] ${html.length}`);
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   const contact: Contact = {};
 
-  contact.name = doc.querySelector('h2.hero-header')?.textContent?.trim();
-  contact.position = doc.querySelector('h2.hero-header + p')?.textContent?.trim();
+  contact.name = strip(doc.querySelector('h2.hero-header')?.textContent);
+  contact.position = strip(doc.querySelector('h2.hero-header + p')?.textContent);
 
   doc.querySelectorAll('p').forEach((p) => {
-    const pText = p.textContent?.trim();
-    const hasIcon = p.querySelectorAll('i').length === 1;
-    if (hasIcon && pText?.includes('Phone:')) {
-      contact.phone = pText.replace('Phone:', '').trim();
+    const pText = strip(p.textContent);
+    if (hasChild(p, 'i', 'fa-mobile') && pText?.includes('Phone:')) {
+      contact.phone = strip(pText.replace('Phone:', ''));
       return;
-    } else if (hasIcon && pText?.includes('Email:')) {
-      contact.email = pText.replace('Email:', '').trim();
+    } else if (hasChild(p, 'i', 'fa-envelope-o') && pText?.includes('Email:')) {
+      contact.email = strip(pText.replace('Email:', ''));
       return;
-    } else if (hasIcon && pText?.includes('Campus:')) {
-      contact.campus = pText.replace('Campus:', '').trim();
+    } else if (hasChild(p, 'i', 'fa-map-marker') && pText?.includes('Campus:')) {
+      contact.campus = strip(pText.replace('Campus:', ''));
       return;
-    } else if (hasIcon && pText?.includes('School of')) {
-      contact.school = pText.substring(pText.indexOf('School of')).trim();
+    } else if (hasChild(p, 'i', 'fa-users') && pText) {
+      contact.school = pText;
     }
   });
   doc.querySelectorAll('a').forEach((a) => {
-    const aText = a.textContent?.trim();
+    const aText = strip(a.textContent);
     if (aText?.includes('Media engagement')) {
       if (contact.contactAbout) contact.contactAbout += ', ';
       contact.contactAbout = 'Media engagement';
