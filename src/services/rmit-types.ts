@@ -26,4 +26,5 @@ interface Contact {
   campus?: string;
   contactAbout?: string;
   orcid?: string;
+  meta?: Record<string, any>;
 }

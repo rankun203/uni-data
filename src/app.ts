@@ -1,5 +1,5 @@
 import express, { NextFunction, Request, Response } from 'express';
-import { getContacts } from './services/rmit-contacts';
+import { getContacts, updateContacts } from './services/rmit-contacts';
 import { logger } from './utils/logger';
 import { initializeDatabase } from './services/contacts-db';
 
@@ -14,8 +14,14 @@ async function startServer() {
     next();
   });
 
-  app.get('/universities/rmit/academic-contacts', async (_req: Request, res: Response) => {
-    const contacts = await getContacts(db);
+  app.get('/universities/rmit/academic-contacts', async (req: Request, res: Response) => {
+    const forceRefresh = req.query.forceRefresh === 'true';
+    const contacts = await getContacts(db, forceRefresh);
+    res.json(contacts);
+  });
+
+  app.put('/universities/rmit/academic-contacts', async (_req: Request, res: Response) => {
+    const contacts = await updateContacts(db);
     res.json(contacts);
   });
 
@@ -26,7 +32,7 @@ async function startServer() {
   });
 
   app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+    logger.info(`Server running on http://localhost:${port}`);
   });
 }
 

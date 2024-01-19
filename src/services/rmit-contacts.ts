@@ -1,8 +1,10 @@
 import { XMLParser } from 'fast-xml-parser';
-import { JSDOM } from 'jsdom';
+import R from 'ramda';
 import { logger } from '../utils/logger';
-import { getContactFromDatabase, initializeDatabase, saveContactToDatabase } from './contacts-db';
+import { getContactsCached, getContactsFromDatabase, saveContactToDatabase } from './contacts-db';
 import { Database } from 'sqlite';
+import { createContact } from './rmit-contact-parser';
+import { NotFoundError, UnknownPageStructureError } from './errors';
 
 export async function getRMITContactUrls(): Promise<ContactUrl[]> {
   const sitemapUrl = 'https://www.rmit.edu.au/sitemap.xml';
@@ -34,100 +36,62 @@ export async function getRMITContactUrls(): Promise<ContactUrl[]> {
   return urls;
 }
 
-export async function parsePageToContact(url: ContactUrl) {
-  logger.info(`[parsePageToContact] ${url}`);
-  const result = await fetch(url.url);
-  if (!result.ok) {
-    throw new Error(`Unable to fetch ${url}`);
-  }
-
-  const html = await result.text();
-  const contact = await parsePageContentToContact(html);
-  if (!contact) return contact;
-
-  contact.url = url.url;
-  contact.lastModified = url.lastModified;
-  return contact;
-}
-
-export async function parsePageContentToContact(html: string) {
-  logger.info(`[parsePageContentToContact] ${html.length}`);
-  const dom = new JSDOM(html);
-  const doc = dom.window.document;
-  const contact: Contact = {};
-
-  contact.name = doc.querySelector('.masthead > h1')?.textContent?.trim();
-
-  const summaryEle = doc.querySelector('.staff-summary .c-summary');
-
-  summaryEle?.querySelectorAll('div.c-summary-cell').forEach((p) => {
-    const spans = p.querySelectorAll('span');
-    for (let i = 0; i < spans.length; i++) {
-      const span = spans.item(i);
-      const spanName = span.textContent?.trim();
-      switch (spanName) {
-        case 'Position:':
-          contact.position = spans.item(i + 1)?.textContent?.trim();
-          break;
-        case 'College / Portfolio:':
-          contact.college = spans.item(i + 1)?.textContent?.trim();
-          break;
-        case 'School / Department:':
-          contact.school = spans.item(i + 1)?.textContent?.trim();
-          break;
-        case 'Phone:':
-          contact.position = spans
-            .item(i + 1)
-            ?.textContent?.trim()
-            .replace(/\s+/g, ' ');
-          break;
-        case 'Email:':
-          contact.email = spans.item(i + 1)?.textContent?.trim();
-          break;
-        case 'Campus:':
-          contact.campus = spans.item(i + 1)?.textContent?.trim();
-          break;
-        case 'Contact me about:':
-          contact.contactAbout = spans.item(i + 1)?.textContent?.trim();
-          break;
-        case 'ORCID:':
-          contact.orcid = spans.item(i + 1)?.textContent?.trim();
-          break;
-      }
-    }
-  });
-
-  if (!contact.name) {
-    return null;
-  }
-
-  return contact;
-}
-
-export async function getContacts(db: Database) {
+export async function updateContacts(db: Database) {
   const urls = await getRMITContactUrls();
-  logger.info(`[getContacts] urls ${urls.length}`);
+  const dbContacts = (await getContactsFromDatabase(db)) || [];
+  const keyedDbContacts = R.indexBy(R.prop('url'), dbContacts);
+  logger.info(`[getContacts] urls ${urls.length}, db contacts ${dbContacts.length}`);
 
   // Function to process a chunk of URLs
   async function processChunk(chunk: ContactUrl[]) {
-    logger.info('[getContacts] processChunk');
     return Promise.all(
       chunk.map(async (url) => {
-        const existingContact = await getContactFromDatabase(db, url.url);
-        if (existingContact && existingContact.lastModified === url.lastModified) {
-          return existingContact;
-        } else {
-          try {
-            const contact = await parsePageToContact(url);
-            if (contact) {
-              await saveContactToDatabase(db, url, contact);
-            }
-            return contact;
-          } catch (e) {
-            logger.error(`Unable to fetch ${url.url}`);
+        logger.info(`[getContacts] processing lastModified ${url.lastModified}, url ${url.url}`);
+        // const existingContact = await getContactFromDatabase(db, url.url);
+        const existingContact = keyedDbContacts[url.url];
+
+        if (existingContact) {
+          if (shouldSkipLink(existingContact)) {
+            logger.info(`[getContacts] skipping ${url.url}: ${existingContact.meta?.skipReason}}`);
             return null;
           }
+          // sitemap doesn't have lastModified for page, return cached
+          if (url.lastModified === undefined) return existingContact;
+
+          // sitemap lastModified === db lastModified
+          if (url.lastModified === existingContact.lastModified) return existingContact;
         }
+
+        // sitemap lastModified !== db lastModified, remote record updated
+        logger.info(
+          `[getContacts] remote contact updated local ${existingContact?.lastModified}, sitemap ${url.lastModified}, url ${url.url}`,
+        );
+
+        let contact: Contact | undefined;
+        try {
+          contact = await createContact(url);
+
+          if (!contact) {
+            logger.error(`[getContacts] Unable to parse page to contact ${url.url}`);
+            return null;
+          }
+        } catch (e) {
+          logger.error(`Unable to fetch ${url.url}: ${(e as Error).message}`);
+
+          if (e instanceof UnknownPageStructureError) {
+            const meta = { skip: true, skipReason: 'unknown page structure' };
+            contact = { url: url.url, lastModified: url.lastModified, meta };
+          } else if (e instanceof NotFoundError) {
+            const meta = { skip: true, skipReason: 'dead link' };
+            contact = { url: url.url, lastModified: url.lastModified, meta };
+          } else {
+            const meta = { skip: true, skipReason: 'link issue' };
+            contact = { url: url.url, lastModified: url.lastModified, meta };
+          }
+        }
+        await saveContactToDatabase(db, url, contact);
+        keyedDbContacts[url.url] = contact;
+        return contact;
       }),
     );
   }
@@ -144,6 +108,14 @@ export async function getContacts(db: Database) {
     contacts.push(...filteredContacts);
   }
 
-  logger.info('contacts', contacts);
   return contacts;
+}
+
+export async function getContacts(db: Database, forceRefresh = false) {
+  const dbContacts = (await getContactsCached(db, forceRefresh)) || [];
+  return dbContacts;
+}
+
+function shouldSkipLink(contact: Contact | undefined) {
+  return contact?.meta?.skip || false;
 }
