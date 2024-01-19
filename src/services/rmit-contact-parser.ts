@@ -50,7 +50,7 @@ export async function parsePageContentToContact(html: string) {
           contact.school = strip(spans.item(i + 1)?.textContent);
           break;
         case 'Phone:':
-          contact.position = strip(spans.item(i + 1)?.textContent?.replace(/\s+/g, ' '));
+          contact.phone = strip(spans.item(i + 1)?.textContent?.replace(/\s+/g, ' '));
           break;
         case 'Email:':
           contact.email = strip(spans.item(i + 1)?.textContent);
