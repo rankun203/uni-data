@@ -5,17 +5,18 @@ import { NotFoundError, UnknownPageStructureError } from './errors';
 
 export async function createContact(url: ContactUrl) {
   logger.info(`[parsePageToContact] ${url.url}`);
-  const result = await fetch(url.url);
-  if (!result.ok) {
+  const resp = await fetch(url.url);
+  const finalUrl = resp.url;
+  if (!resp.ok) {
     throw new NotFoundError(`Request status not ok 200`);
   }
 
-  const html = await result.text();
+  const html = await resp.text();
   let contact = await parsePageContentToContact(html);
   if (!contact) contact = await parsePageContentToContact2(html);
   if (!contact) throw new UnknownPageStructureError(`Unknown page structure ${url.url}`);
 
-  contact.url = url.url;
+  contact.url = finalUrl;
   contact.lastModified = url.lastModified;
   contact.meta = {};
   return contact;

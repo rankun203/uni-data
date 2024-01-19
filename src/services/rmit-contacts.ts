@@ -40,19 +40,21 @@ export async function updateContacts(db: Database) {
   const urls = await getRMITContactUrls();
   const dbContacts = (await getContactsFromDatabase(db)) || [];
   const keyedDbContacts = R.indexBy(R.prop('url'), dbContacts);
-  logger.info(`[getContacts] urls ${urls.length}, db contacts ${dbContacts.length}`);
+  logger.info(`[updateContacts] urls ${urls.length}, db contacts ${dbContacts.length}`);
 
   // Function to process a chunk of URLs
   async function processChunk(chunk: ContactUrl[]) {
     return Promise.all(
       chunk.map(async (url) => {
-        logger.info(`[getContacts] processing lastModified ${url.lastModified}, url ${url.url}`);
+        logger.info(`[updateContacts] processing lastModified ${url.lastModified}, url ${url.url}`);
         // const existingContact = await getContactFromDatabase(db, url.url);
         const existingContact = keyedDbContacts[url.url];
 
         if (existingContact) {
           if (shouldSkipLink(existingContact)) {
-            logger.info(`[getContacts] skipping ${url.url}: ${existingContact.meta?.skipReason}}`);
+            logger.info(
+              `[updateContacts] skipping ${url.url}: ${existingContact.meta?.skipReason}}`,
+            );
             return null;
           }
           // sitemap doesn't have lastModified for page, return cached
@@ -64,7 +66,7 @@ export async function updateContacts(db: Database) {
 
         // sitemap lastModified !== db lastModified, remote record updated
         logger.info(
-          `[getContacts] remote contact updated local ${existingContact?.lastModified}, sitemap ${url.lastModified}, url ${url.url}`,
+          `[updateContacts] remote contact updated local ${existingContact?.lastModified}, sitemap ${url.lastModified}, url ${url.url}`,
         );
 
         let contact: Contact | undefined;
@@ -72,11 +74,11 @@ export async function updateContacts(db: Database) {
           contact = await createContact(url);
 
           if (!contact) {
-            logger.error(`[getContacts] Unable to parse page to contact ${url.url}`);
+            logger.error(`[updateContacts] Unable to parse page to contact ${url.url}`);
             return null;
           }
         } catch (e) {
-          logger.error(`Unable to fetch ${url.url}: ${(e as Error).message}`);
+          logger.error(`[updateContacts] Unable to fetch ${url.url}: ${(e as Error).message}`);
 
           if (e instanceof UnknownPageStructureError) {
             const meta = { skip: true, skipReason: 'unknown page structure' };
@@ -101,7 +103,7 @@ export async function updateContacts(db: Database) {
   const contacts = [];
 
   for (let i = 0; i < urls.length; i += chunkSize) {
-    logger.info(`[getContacts] processing (${i}-${i + chunkSize})/${urls.length}`);
+    logger.info(`[updateContacts] processing (${i}-${i + chunkSize})/${urls.length}`);
     const chunk = urls.slice(i, i + chunkSize);
     const contactsInChunk = await processChunk(chunk);
     const filteredContacts = contactsInChunk.filter(Boolean);
