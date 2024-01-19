@@ -1,0 +1,17 @@
+version: '3.8'
+networks:
+  # docker network create public
+  public:
+    external: true
+services:
+  api:
+    networks:
+      - public
+      - default
+    ports:
+      - '3000'
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.uni-data.rule=Host("uni-data.sps.mindfine.com")'
+      - 'traefik.http.services.uni-data.loadbalancer.server.port=3000'
+      - 'traefik.http.routers.uni-data.tls.certresolver=myresolver'
